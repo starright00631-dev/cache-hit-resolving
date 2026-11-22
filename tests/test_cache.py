@@ -166,7 +166,13 @@ class CacheTest(unittest.TestCase):
         answer = {"type": "item.completed", "item": {"type": "agent_message", "text": "a|b"}}
         shell = {"type": "item.completed", "item": {"type": "command_execution"}}
         usage_event = {"type": "turn.completed", "usage": usage(1000, 800)}
-        for rows, expected in (([answer, usage_event], True), ([shell, shell, answer, usage_event], False)):
+        failed = {"type": "item.completed", "item": {"type": "command_execution", "exit_code": 1}}
+        cases = (
+            ([answer, usage_event], True),
+            ([shell, shell, answer, usage_event], False),
+            ([failed, answer, usage_event], False),
+        )
+        for rows, expected in cases:
             output = ("\n".join(json.dumps(row) for row in rows) + "\n").encode("utf-8")
             process = subprocess.CompletedProcess(["codex"], 0, output, b"")
             capture = self.path / "capture.jsonl"

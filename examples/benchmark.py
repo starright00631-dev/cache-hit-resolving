@@ -24,8 +24,9 @@ from codex_cache.report import compare
 def probe(command: list[str], workspace: Path, log: Path, expected: str, timeout: int):
     read_fixture = "Get-Content -LiteralPath sample.txt" if os.name == "nt" else "cat sample.txt"
     prompt = (
-        f"Run `{read_fixture}` once. Reply with the first and last lines of the file output "
-        "joined by |, with no spaces, quotes, or markdown."
+        f"Read the entire file with exactly this one command: `{read_fixture}`. "
+        "Use an output budget of 8000 tokens if the tool offers one. "
+        "Reply with the first line of the file only, with no quotes or markdown."
     )
     start = time.monotonic()
     result = subprocess.run(
@@ -35,7 +36,7 @@ def probe(command: list[str], workspace: Path, log: Path, expected: str, timeout
     seconds = round(time.monotonic() - start, 2)
     messages = []
     failure = False
-    commands_run = 0
+    command_exits = []
     for line in result.stdout.splitlines():
         try:
             event = json.loads(line)
@@ -49,19 +50,23 @@ def probe(command: list[str], workspace: Path, log: Path, expected: str, timeout
         if kind != "item.completed" or not isinstance(item, dict):
             continue
         if item.get("type") == "command_execution":
-            commands_run += 1
+            exit_code = item.get("exit_code")
+            command_exits.append(exit_code if type(exit_code) is int else None)
         if item.get("type") == "agent_message":
             messages.append(item.get("text"))
     answer_matches = bool(
         messages and isinstance(messages[-1], str) and messages[-1].strip() == expected
     )
     # Some tool implementations do not emit per-command items in exec JSON.
-    passed = result.returncode == 0 and not failure and answer_matches and commands_run <= 1
+    passed = (
+        result.returncode == 0 and not failure and answer_matches
+        and len(command_exits) <= 1 and all(code in (0, None) for code in command_exits)
+    )
     # These captures may contain tool output. They exist only in the temp directory.
     log.write_bytes(result.stdout)
     return {
         "passed": passed, "seconds": seconds, "exit_code": result.returncode,
-        "reported_commands": commands_run, "answer_matches": answer_matches,
+        "command_exit_codes": command_exits, "answer_matches": answer_matches,
     }
 
 
@@ -86,13 +91,13 @@ def main() -> int:
             root = Path(scratch)
             workspace = root / "workspace"
             workspace.mkdir()
-            first, last = secrets.token_hex(4), secrets.token_hex(4)
+            marker = f"HEADER-{secrets.token_hex(6)}"
             lines = [
                 f"record {i:04d}: alpha bravo charlie delta echo foxtrot golf hotel"
-                for i in range(1400)
+                for i in range(700)
             ]
             (workspace / "sample.txt").write_text(
-                "\n".join([first, *lines, last]) + "\n", encoding="ascii",
+                "\n".join([marker, *lines]) + "\n", encoding="ascii",
             )
             arms = {
                 "baseline": [*codex, *options],
@@ -103,7 +108,7 @@ def main() -> int:
             usage = {}
             for name in order:
                 log = root / f"{name}.jsonl"
-                runs[name] = probe(arms[name], workspace, log, f"{first}|{last}", args.timeout)
+                runs[name] = probe(arms[name], workspace, log, marker, args.timeout)
                 usage[name] = collect([log], Counter())
 
             result = {"trial_order": order, "tool_output_token_limit": args.tool_limit, "runs": runs}
