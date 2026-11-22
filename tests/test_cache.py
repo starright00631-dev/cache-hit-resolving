@@ -2,6 +2,7 @@ import codecs
 import contextlib
 import io
 import json
+import subprocess
 import tempfile
 import unittest
 from collections import Counter
@@ -12,6 +13,7 @@ from unittest.mock import patch
 from codex_cache.__main__ import codex_command, main
 from codex_cache.logs import collect
 from codex_cache.report import compare, audit
+from examples.benchmark import probe
 
 
 def event(kind, payload, at="2026-11-21T00:00:00Z"):
@@ -158,6 +160,21 @@ class CacheTest(unittest.TestCase):
         paths = {"codex.cmd": str(self.path / "codex.cmd"), "node.exe": "node.exe"}
         self.assertEqual(codex_command(paths.get, windows=True), ["node.exe", str(script)])
         self.assertEqual(codex_command({"codex": "/bin/codex"}.get, windows=False), ["/bin/codex"])
+
+
+    def test_benchmark_checks_the_answer_and_reports_optional_command_events(self):
+        answer = {"type": "item.completed", "item": {"type": "agent_message", "text": "a|b"}}
+        shell = {"type": "item.completed", "item": {"type": "command_execution"}}
+        usage_event = {"type": "turn.completed", "usage": usage(1000, 800)}
+        for rows, expected in (([answer, usage_event], True), ([shell, shell, answer, usage_event], False)):
+            output = ("\n".join(json.dumps(row) for row in rows) + "\n").encode("utf-8")
+            process = subprocess.CompletedProcess(["codex"], 0, output, b"")
+            capture = self.path / "capture.jsonl"
+            with patch("examples.benchmark.subprocess.run", return_value=process):
+                result = probe(["codex"], self.path, capture, "a|b", 10)
+            self.assertEqual(result["passed"], expected)
+            self.assertTrue(result["answer_matches"])
+            self.assertEqual(len(collect([capture], Counter())), 1)
 
 
 if __name__ == "__main__":

@@ -60,7 +60,7 @@ python examples/benchmark.py --model MODEL
 python examples/benchmark.py --model MODEL --candidate-first
 ```
 
-Replace `MODEL` with a model available to your account, or omit the flag to use the CLI's default. The script makes two real Codex calls in separate sessions in a temporary directory. Both runs must execute exactly one command and return the same two generated markers from a long output. It reports elapsed time and usage after both pass. Reverse the order and repeat to see how much results vary with cache warmth. This synthetic task demonstrates tool-output behavior. It cannot establish savings on a different workload or guarantee 99% reuse.
+Replace `MODEL` with a model available to your account, or omit the flag to use the CLI's default. The script makes two real Codex calls in separate sessions in a temporary directory. Both runs are asked to read a long file with one command and must return its two generated markers. The script also checks for extra commands when the CLI reports them. Both runs use your Codex configuration and a read-only sandbox, with the candidate overriding the tool-output budget. It reports elapsed time and usage after both pass. Reverse the order and repeat to see how much results vary with cache warmth. This synthetic task demonstrates tool-output behavior. It cannot establish savings on a different workload or guarantee 99% reuse.
 
 ## Development
 

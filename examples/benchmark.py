@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import secrets
 import subprocess
 import sys
@@ -21,9 +22,10 @@ from codex_cache.report import compare
 
 
 def probe(command: list[str], workspace: Path, log: Path, expected: str, timeout: int):
+    read_fixture = "Get-Content -LiteralPath sample.txt" if os.name == "nt" else "cat sample.txt"
     prompt = (
-        "Run python sample.py once. Reply with the first and last lines of its output "
-        "joined by |, with no spaces, quotes, or markdown. Do not read the source file."
+        f"Run `{read_fixture}` once. Reply with the first and last lines of the file output "
+        "joined by |, with no spaces, quotes, or markdown."
     )
     start = time.monotonic()
     result = subprocess.run(
@@ -50,14 +52,16 @@ def probe(command: list[str], workspace: Path, log: Path, expected: str, timeout
             commands_run += 1
         if item.get("type") == "agent_message":
             messages.append(item.get("text"))
-    passed = result.returncode == 0 and not failure and commands_run == 1 and bool(
+    answer_matches = bool(
         messages and isinstance(messages[-1], str) and messages[-1].strip() == expected
     )
+    # Some tool implementations do not emit per-command items in exec JSON.
+    passed = result.returncode == 0 and not failure and answer_matches and commands_run <= 1
     # These captures may contain tool output. They exist only in the temp directory.
     log.write_bytes(result.stdout)
     return {
         "passed": passed, "seconds": seconds, "exit_code": result.returncode,
-        "commands_run": commands_run,
+        "reported_commands": commands_run, "answer_matches": answer_matches,
     }
 
 
@@ -72,7 +76,7 @@ def main() -> int:
     try:
         codex = codex_command()
         options = [
-            "exec", "--ignore-user-config", "--skip-git-repo-check",
+            "exec", "--skip-git-repo-check",
             "--sandbox", "read-only", "--ephemeral", "--json",
         ]
         if args.model:
@@ -83,12 +87,12 @@ def main() -> int:
             workspace = root / "workspace"
             workspace.mkdir()
             first, last = secrets.token_hex(4), secrets.token_hex(4)
-            (workspace / "sample.py").write_text(
-                f"print({first!r})\n"
-                "for i in range(1400):\n"
-                "    print(f'record {i:04d}: alpha bravo charlie delta echo foxtrot golf hotel')\n"
-                f"print({last!r})\n",
-                encoding="ascii",
+            lines = [
+                f"record {i:04d}: alpha bravo charlie delta echo foxtrot golf hotel"
+                for i in range(1400)
+            ]
+            (workspace / "sample.txt").write_text(
+                "\n".join([first, *lines, last]) + "\n", encoding="ascii",
             )
             arms = {
                 "baseline": [*codex, *options],
@@ -108,7 +112,7 @@ def main() -> int:
                 print(json.dumps(result, indent=2))
                 return 0
             print(json.dumps(result, indent=2))
-            print("A trial failed the answer or one-command check. No savings claim.", file=sys.stderr)
+            print("A trial failed the task or command-count check. No savings claim.", file=sys.stderr)
             return 1
     except (OSError, ValueError, subprocess.TimeoutExpired) as error:
         if isinstance(error, subprocess.TimeoutExpired):
