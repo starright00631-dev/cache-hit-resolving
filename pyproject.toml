@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "codex-cache-resolve"
+version = "0.1.0"
+description = "Measure Codex prompt-cache reuse and compare tool-output budgets"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+license-files = ["LICENSE"]
+dependencies = []
+
+[project.urls]
+Repository = "https://github.com/starright00631-dev/cache-hit-resolving"
+
+[project.scripts]
+codex-cache-resolve = "codex_cache.__main__:main"
+
+[tool.setuptools.packages.find]
+include = ["codex_cache"]
